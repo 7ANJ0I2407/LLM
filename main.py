@@ -1,6 +1,9 @@
+# main.py
+import os
 from fastapi import FastAPI
 from pydantic import BaseModel
 from gradio_client import Client
+import uvicorn
 
 app = FastAPI()
 client = Client("hysts/mistral-7b")
@@ -39,3 +42,8 @@ Text: {data.text}
     if answer.lower().strip() == "null":
         return {"result": None}
     return {"result": answer}
+
+# This ensures the correct port is used on Render
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
