@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from gradio_client import Client
 import uvicorn
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
 app = FastAPI()
 client = Client("hysts/mistral-7b")
@@ -15,8 +17,11 @@ class JobPrompt(BaseModel):
 async def root():
     return {"message": "✅ Job Extraction API is running!"}
 
-@app.get("/ping")
-async def ping():
+
+@app.api_route("/ping", methods=["GET", "HEAD"])
+async def ping(request: Request):
+    if request.method == "HEAD":
+        return JSONResponse(content=None, status_code=200)
     return {"status": "ok"}
 
 
