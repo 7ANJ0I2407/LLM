@@ -15,6 +15,11 @@ class JobPrompt(BaseModel):
 async def root():
     return {"message": "✅ Job Extraction API is running!"}
 
+@app.get("/ping")
+async def ping():
+    return {"status": "ok"}
+
+
 @app.post("/extract-job")
 async def extract_job(data: JobPrompt):
     prompt = f"""
