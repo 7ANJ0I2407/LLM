@@ -6,6 +6,8 @@ from gradio_client import Client
 import uvicorn
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
+
 
 app = FastAPI()
 client = Client("hysts/mistral-7b")
@@ -25,6 +27,8 @@ async def ping(request: Request):
     return {"status": "ok"}
 
 
+
+
 @app.post("/extract-job")
 async def extract_job(data: JobPrompt):
     prompt = f"""
@@ -38,20 +42,25 @@ Given the following text, do one of two things:
 Text: {data.text}
 [/INST]
 """
-    result = client.predict(
-        message=prompt,
-        param_2=1024,
-        param_3=0.6,
-        param_4=0.9,
-        param_5=50,
-        param_6=1.2,
-        api_name="/chat"
-    )
+    try:
+        result = await run_in_threadpool(
+            client.predict,
+            message=prompt,
+            param_2=1024,
+            param_3=0.6,
+            param_4=0.9,
+            param_5=50,
+            param_6=1.2,
+            api_name="/chat"
+        )
 
-    answer = result.split("[/INST]")[-1].strip()
-    if answer.lower().strip() == "null":
-        return {"result": None}
-    return {"result": answer}
+        answer = result.split("[/INST]")[-1].strip()
+        if answer.lower().strip() == "null":
+            return {"result": None}
+        return {"result": answer}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 
 # This ensures the correct port is used on Render
 if __name__ == "__main__":
