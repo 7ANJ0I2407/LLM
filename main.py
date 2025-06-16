@@ -9,8 +9,15 @@ from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
 
 
+# import os
+# from gradio_client import Client
+
+HF_TOKEN = os.getenv("HF_TOKEN")
+client = Client("hysts/mistral-7b", hf_token=HF_TOKEN)
+
+
 app = FastAPI()
-client = Client("hysts/mistral-7b")
+# client = Client("hysts/mistral-7b")
 
 class JobPrompt(BaseModel):
     text: str
