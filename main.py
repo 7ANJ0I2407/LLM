@@ -1,23 +1,18 @@
-# main.py
 import os
-from fastapi import FastAPI
+import json
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from gradio_client import Client
 import uvicorn
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from fastapi.concurrency import run_in_threadpool
 
-
-# import os
-# from gradio_client import Client
-
+# Optional: Uncomment if you want to keep your HF token secure
 HF_TOKEN = os.getenv("HF_TOKEN")
 client = Client("hysts/mistral-7b", hf_token=HF_TOKEN)
 
-
-app = FastAPI()
 # client = Client("hysts/mistral-7b")
+app = FastAPI()
 
 class JobPrompt(BaseModel):
     text: str
@@ -26,31 +21,39 @@ class JobPrompt(BaseModel):
 async def root():
     return {"message": "✅ Job Extraction API is running!"}
 
-
 @app.api_route("/ping", methods=["GET", "HEAD"])
 async def ping(request: Request):
     if request.method == "HEAD":
         return JSONResponse(content=None, status_code=200)
     return {"status": "ok"}
 
-
-
-
 @app.post("/extract-job")
 async def extract_job(data: JobPrompt):
     prompt = f"""
-[INST] 
-You are an intelligent job description parser.
+[INST]
+You are a smart job parser.
 
-Given the following text, do one of two things:
-- If it's a job/internship/career-related announcement, return structured details (e.g. company, role, batch, link, location, stipend/salary, duration, mode, other info).
-- If it's not a job-related text, respond with: "null"
+If the input text contains job/internship information, extract all relevant fields and return a valid JSON object. The keys can vary — extract only what's present (e.g. company, role, batch/graduation, link, location, stipend/salary, duration, mode, other info).
 
-Text: {data.text}
+Make sure:
+- The response is valid JSON only (no explanation, no markdown)
+- Do not escape underscores unnecessarily
+- If a field is missing, use null
+- If the input is not job-related, just return null (without quotes)
 [/INST]
+
+Only return:
+- A valid JSON object if details are available
+- Or `null` (without quotes) if not enough info
+
+Do NOT return any extra explanation, apology, or markdown.
+
+
+{data.text}
 """
+
     try:
-        result = await run_in_threadpool(
+        raw_result = await run_in_threadpool(
             client.predict,
             message=prompt,
             param_2=1024,
@@ -61,15 +64,42 @@ Text: {data.text}
             api_name="/chat"
         )
 
-        answer = result.split("[/INST]")[-1].strip()
-        if answer.lower().strip() == "null":
+        response_text = raw_result.strip()
+
+        # Step 1: Handle non-job post
+        if response_text.lower() == "null":
             return {"result": None}
-        return {"result": answer}
+
+        # Step 2: Clean known issues
+        cleaned = response_text
+
+        # Remove markdown if present
+        if cleaned.startswith("```json") or cleaned.startswith("```"):
+            cleaned = "\n".join(cleaned.split("\n")[1:-1])
+
+        # Fix common formatting issues
+        cleaned = cleaned.replace("\\_", "_")
+        cleaned = cleaned.replace(",}", "}")
+        cleaned = cleaned.replace(",]", "]")
+        cleaned = cleaned.replace("“", '"').replace("”", '"')
+        cleaned = cleaned.replace("‘", "'").replace("’", "'")
+
+        # Strip leading explanations (grab only JSON part)
+        json_start = cleaned.find("{")
+        if json_start == -1:
+            raise ValueError("No JSON found")
+        cleaned = cleaned[json_start:]
+
+        # Final parse
+        parsed_json = json.loads(cleaned)
+        if isinstance(parsed_json, dict):
+            return {"result": parsed_json}
+        else:
+            return JSONResponse(status_code=422, content={"error": "Not a JSON object", "raw": response_text})
+
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(status_code=500, content={"error": str(e), "raw": str(raw_result)})
 
-
-# This ensures the correct port is used on Render
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
