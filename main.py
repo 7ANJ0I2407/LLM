@@ -52,6 +52,8 @@ Do NOT return any extra explanation, apology, or markdown.
 {data.text}
 """
 
+    raw_result = None  # Predefine to avoid UnboundLocalError
+
     try:
         raw_result = await run_in_threadpool(
             client.predict,
@@ -98,7 +100,14 @@ Do NOT return any extra explanation, apology, or markdown.
             return JSONResponse(status_code=422, content={"error": "Not a JSON object", "raw": response_text})
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e), "raw": str(raw_result)})
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": str(e),
+                "raw": raw_result if raw_result else "LLM call failed before response"
+            }
+        )
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
