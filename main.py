@@ -81,6 +81,7 @@ Instructions:
 - If a field is missing, use null.
 - Do not include any explanations, markdown, or extra text, unnecessarily escape underscores or other characters.
 - don't include any telegram links or usernames and whatsapp links.
+- apply link must not be a youtube link or telegram link or whatsapp link if it is then use null.
 - The output must be syntactically valid JSON. Do not return partial or malformed JSON structures.
 
 Text: {data.text}
