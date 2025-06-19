@@ -102,7 +102,7 @@ Text: {data.text}
         return {"result": parsed}
     except json.JSONDecodeError:
         async with httpx.AsyncClient() as xclient:
-            fix_resp = await xclient.post("http://localhost:8000/fix-json", json={"raw_text": answer})
+            fix_resp = await xclient.post("https://llm-59ws.onrender.com/fix-json", json={"raw_text": answer})
             return {"result": fix_resp.json()}
 
 if __name__ == "__main__":
