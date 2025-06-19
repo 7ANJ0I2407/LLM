@@ -48,7 +48,7 @@ Text:
     completion = client.chat.completions.create(
         model="gemma2-9b-it",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.5,
+        temperature=0.35,
         max_tokens=1024,
         top_p=0.9,
         response_format={"type": "json_object"},
@@ -84,7 +84,7 @@ Text:
     completion = client.chat.completions.create(
         model="llama3-8b-8192",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
+        temperature=0.5,
         max_tokens=1024,
         response_format={"type": "json_object"},
         top_p=0.9,
