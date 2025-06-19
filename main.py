@@ -7,11 +7,16 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from groq import Groq
 from dotenv import load_dotenv
+from pymongo import MongoClient
 
 load_dotenv()
 
+# === Init Clients ===
 app = FastAPI()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+mongo_client = MongoClient(os.getenv("MONGO_URI"))
+db = mongo_client["jobdbFinal"]
+failed_collection = db["failed_generations"]
 
 class JobPrompt(BaseModel):
     text: str
@@ -33,12 +38,9 @@ async def ping(request: Request):
 async def fix_raw_json(data: RawFixPrompt):
     prompt = f"""
 You will receive a text that looks like JSON but may be invalid.
-
-Fix it and return a valid JSON object. Each job should be inside a "jobs" array and have these fields:
+Fix it and return a valid JSON object. Each job should be inside a \"jobs\" array and have these fields:
 company, role, batch, link, location, stipend, salary, duration, mode, other_info.
-
 If any field is missing, use null. Ensure it's valid JSON. Do not return any explanations or markdown.
-
 Text:
 {data.raw_text}
 """
@@ -67,7 +69,6 @@ Text:
 async def extract_job(data: JobPrompt):
     prompt = f"""
 You are a job post extractor.
-
 Instructions:
 - Extract structured job data only if the input has job/internship info and a valid apply link (not telegram/youtube/whatsapp).
 - Return a JSON object: {{"jobs": [{{job1}}, {{job2}}, ...]}}
@@ -76,7 +77,6 @@ Instructions:
 - If no job is found or no valid links, return `null` (without quotes).
 - Do NOT include any markdown, extra commentary, or invalid formatting.
 - Output must be syntactically valid JSON.
-
 Text:
 {data.text}
 """
@@ -92,27 +92,32 @@ Text:
 
     answer = completion.choices[0].message.content.strip()
 
-    # Handle exact "null" return
     if answer.strip().lower() == "null":
         return {"result": None}
 
-    # Try parsing directly
     try:
         parsed = json.loads(answer)
         return {"result": parsed}
     except json.JSONDecodeError:
-        # Fallback to /fix-json route
         try:
             async with httpx.AsyncClient() as xclient:
                 fix_resp = await xclient.post(
                     "https://llm-59ws.onrender.com/fix-json",
                     json={"raw_text": answer}
                 )
-                fix_json = fix_resp.json()
-                return {"result": fix_json.get("result")}
+                fixed = fix_resp.json()
+                if 'result' in fixed:
+                    return {"result": fixed["result"]}
+                else:
+                    raise Exception("Fix endpoint did not return 'result'")
         except Exception as fallback_error:
+            failed_collection.insert_one({
+                "original_text": data.text,
+                "bad_llm_output": answer,
+                "error": str(fallback_error)
+            })
             return {
-                "error": "Failed to parse LLM output and fallback also failed.",
+                "error": "Failed to parse and fix JSON",
                 "raw_llm": answer,
                 "fallback_error": str(fallback_error)
             }
