@@ -1,3 +1,4 @@
 fastapi
 uvicorn
-gradio_client
+groq
+python-dotenv

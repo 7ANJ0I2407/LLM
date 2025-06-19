@@ -1,25 +1,27 @@
 import os
 import json
+import httpx
+import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
-from gradio_client import Client
-import uvicorn
+from groq import Groq
+from dotenv import load_dotenv
 
-# Optional: Uncomment if you want to keep your HF token secure
-HF_TOKEN = os.getenv("HF_TOKEN")
-client = Client("hysts/mistral-7b", hf_token=HF_TOKEN)
+load_dotenv()
 
-# client = Client("hysts/mistral-7b")
 app = FastAPI()
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 class JobPrompt(BaseModel):
     text: str
 
+class RawFixPrompt(BaseModel):
+    raw_text: str
+
 @app.get("/")
 async def root():
-    return {"message": "✅ Job Extraction API is running!"}
+    return {"message": "✅ Job Extraction API is running with Groq LLM"}
 
 @app.api_route("/ping", methods=["GET", "HEAD"])
 async def ping(request: Request):
@@ -27,10 +29,45 @@ async def ping(request: Request):
         return JSONResponse(content=None, status_code=200)
     return {"status": "ok"}
 
+@app.post("/fix-json")
+async def fix_raw_json(data: RawFixPrompt):
+    prompt = f"""
+You will receive a text that looks structured but is not valid JSON.
+
+Convert it into valid JSON object with keys: company, role, batch, link, location, stipend, salary, duration, mode, other_info and others if given so.
+
+If a field is not present, assign it as null.
+
+Text:
+{data.raw_text}
+"""
+
+    completion = client.chat.completions.create(
+        model="gemma2-9b-it",
+        messages=[{
+            "role": "user",
+            "content": prompt
+        }],
+        temperature=0.5,
+        max_tokens=1024,
+        top_p=0.9,
+        response_format={"type": "json_object"},
+    )
+
+    answer = completion.choices[0].message.content.strip()
+
+    try:
+        parsed = json.loads(answer)
+        return {"result": parsed}
+    except json.JSONDecodeError:
+        return {
+            "error": "Failed to parse into valid JSON",
+            "raw_response": answer
+        }
+
 @app.post("/extract-job")
 async def extract_job(data: JobPrompt):
     prompt = f"""
-[INST]
 You are a smart job parser.
 
 If the input text contains job/internship information, extract all relevant fields and return a valid JSON object. The keys can vary — extract only what's present (e.g. company, role, batch/graduation, link, location, stipend/salary, duration, mode, other info).
@@ -40,74 +77,33 @@ Make sure:
 - Do not escape underscores unnecessarily
 - If a field is missing, use null
 - If the input is not job-related, just return null (without quotes)
-[/INST]
 
 Only return:
 - A valid JSON object if details are available
-- Or `null` (without quotes) if not enough info
+- Or null (without quotes) if not enough info
 
-Do NOT return any extra explanation, apology, or markdown.
-
-
-{data.text}
+Text: {data.text}
 """
 
-    raw_result = None  # Predefine to avoid UnboundLocalError
+    completion = client.chat.completions.create(
+        model="llama3-8b-8192",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=1024,
+        response_format={"type": "json_object"},
+        top_p=0.9,
+    )
 
+    answer = completion.choices[0].message.content.strip()
+    if answer.lower() == "null":
+        return {"result": None}
     try:
-        raw_result = await run_in_threadpool(
-            client.predict,
-            message=prompt,
-            param_2=1024,
-            param_3=0.6,
-            param_4=0.9,
-            param_5=50,
-            param_6=1.2,
-            api_name="/chat"
-        )
-
-        response_text = raw_result.strip()
-
-        # Step 1: Handle non-job post
-        if response_text.lower() == "null":
-            return {"result": None}
-
-        # Step 2: Clean known issues
-        cleaned = response_text
-
-        # Remove markdown if present
-        if cleaned.startswith("```json") or cleaned.startswith("```"):
-            cleaned = "\n".join(cleaned.split("\n")[1:-1])
-
-        # Fix common formatting issues
-        cleaned = cleaned.replace("\\_", "_")
-        cleaned = cleaned.replace(",}", "}")
-        cleaned = cleaned.replace(",]", "]")
-        cleaned = cleaned.replace("“", '"').replace("”", '"')
-        cleaned = cleaned.replace("‘", "'").replace("’", "'")
-
-        # Strip leading explanations (grab only JSON part)
-        json_start = cleaned.find("{")
-        if json_start == -1:
-            raise ValueError("No JSON found")
-        cleaned = cleaned[json_start:]
-
-        # Final parse
-        parsed_json = json.loads(cleaned)
-        if isinstance(parsed_json, dict):
-            return {"result": parsed_json}
-        else:
-            return JSONResponse(status_code=422, content={"error": "Not a JSON object", "raw": response_text})
-
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": str(e),
-                "raw": raw_result if raw_result else "LLM call failed before response"
-            }
-        )
-
+        parsed = json.loads(answer)
+        return {"result": parsed}
+    except json.JSONDecodeError:
+        async with httpx.AsyncClient() as xclient:
+            fix_resp = await xclient.post("http://localhost:8000/fix-json", json={"raw_text": answer})
+            return {"result": fix_resp.json()}
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
