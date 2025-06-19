@@ -32,11 +32,12 @@ async def ping(request: Request):
 @app.post("/fix-json")
 async def fix_raw_json(data: RawFixPrompt):
     prompt = f"""
-You will receive a text that looks structured but is not valid JSON.
+You will receive a text that looks like JSON but may be invalid.
 
-Convert it into valid JSON object with keys: company, role, batch, link, location, stipend, salary, duration, mode, other_info and others if given so.
+Fix it and return a valid JSON object. Each job should be inside a "jobs" array and have these fields:
+company, role, batch, link, location, stipend, salary, duration, mode, other_info.
 
-If a field is not present, assign it as null.
+If any field is missing, use null. Ensure it's valid JSON. Do not return any explanations or markdown.
 
 Text:
 {data.raw_text}
@@ -44,10 +45,7 @@ Text:
 
     completion = client.chat.completions.create(
         model="gemma2-9b-it",
-        messages=[{
-            "role": "user",
-            "content": prompt
-        }],
+        messages=[{"role": "user", "content": prompt}],
         temperature=0.5,
         max_tokens=1024,
         top_p=0.9,
@@ -68,23 +66,19 @@ Text:
 @app.post("/extract-job")
 async def extract_job(data: JobPrompt):
     prompt = f"""
-You are a smart job parser.
-
-If the input text contains job/internship information, extract all relevant fields and return a valid JSON object. The keys can vary — extract only what's present (e.g. company, role, batch/graduation, link, location, stipend/salary, duration, mode, other info).
+You are a job post extractor.
 
 Instructions:
+- Extract structured job data only if the input has job/internship info and a valid apply link (not telegram/youtube/whatsapp).
+- Return a JSON object: {{"jobs": [{{job1}}, {{job2}}, ...]}}
+- Use only these keys in each job: company, role, batch, link, location, stipend, salary, duration, mode, other_info.
+- If any field is missing, set it to null.
+- If no job is found or no valid links, return `null` (without quotes).
+- Do NOT include any markdown, extra commentary, or invalid formatting.
+- Output must be syntactically valid JSON.
 
-- Respond with a valid JSON object only — no explanation, no markdown, no text before or after.
-- If the input is not job-related or if it doesn't contain apply link then just return null (without quotes)
-- If multiple jobs are found, return them inside a single JSON object using the key "jobs" with an array of job objects.
-- Use only these keys in each job object if found: company, role, batch, link, location, stipend, salary, duration, mode, other_info.
-- If a field is missing, use null.
-- Do not include any explanations, markdown, or extra text, unnecessarily escape underscores or other characters.
-- don't include any telegram links or usernames and whatsapp links.
-- apply link must not be a youtube link or telegram link or whatsapp link if it is then use null.
-- The output must be syntactically valid JSON. Do not return partial or malformed JSON structures.
-
-Text: {data.text}
+Text:
+{data.text}
 """
 
     completion = client.chat.completions.create(
@@ -97,15 +91,31 @@ Text: {data.text}
     )
 
     answer = completion.choices[0].message.content.strip()
-    if answer.lower() == "null":
+
+    # Handle exact "null" return
+    if answer.strip().lower() == "null":
         return {"result": None}
+
+    # Try parsing directly
     try:
         parsed = json.loads(answer)
         return {"result": parsed}
     except json.JSONDecodeError:
-        async with httpx.AsyncClient() as xclient:
-            fix_resp = await xclient.post("https://llm-59ws.onrender.com/fix-json", json={"raw_text": answer})
-            return {"result": fix_resp.json()}
+        # Fallback to /fix-json route
+        try:
+            async with httpx.AsyncClient() as xclient:
+                fix_resp = await xclient.post(
+                    "https://llm-59ws.onrender.com/fix-json",
+                    json={"raw_text": answer}
+                )
+                fix_json = fix_resp.json()
+                return {"result": fix_json.get("result")}
+        except Exception as fallback_error:
+            return {
+                "error": "Failed to parse LLM output and fallback also failed.",
+                "raw_llm": answer,
+                "fallback_error": str(fallback_error)
+            }
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
