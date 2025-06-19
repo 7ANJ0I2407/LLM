@@ -75,7 +75,7 @@ If the input text contains job/internship information, extract all relevant fiel
 Instructions:
 
 - Respond with a valid JSON object only — no explanation, no markdown, no text before or after.
-- If the input is not job-related, just return null (without quotes)
+- If the input is not job-related or if it doesn't contain apply link then just return null (without quotes)
 - If multiple jobs are found, return them inside a single JSON object using the key "jobs" with an array of job objects.
 - Use only these keys in each job object if found: company, role, batch, link, location, stipend, salary, duration, mode, other_info.
 - If a field is missing, use null.
