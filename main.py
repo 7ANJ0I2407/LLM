@@ -72,15 +72,15 @@ You are a smart job parser.
 
 If the input text contains job/internship information, extract all relevant fields and return a valid JSON object. The keys can vary — extract only what's present (e.g. company, role, batch/graduation, link, location, stipend/salary, duration, mode, other info).
 
-Make sure:
-- The response is valid JSON only (no explanation, no markdown)
-- Do not escape underscores unnecessarily
-- If a field is missing, use null
-- If the input is not job-related, just return null (without quotes)
+Instructions:
 
-Only return:
-- A valid JSON object if details are available
-- Or null (without quotes) if not enough info
+- Respond with a valid JSON object only — no explanation, no markdown, no text before or after.
+- If the input is not job-related, just return null (without quotes)
+- If multiple jobs are found, return them inside a single JSON object using the key "jobs" with an array of job objects.
+- Use only these keys in each job object if found: company, role, batch, link, location, stipend, salary, duration, mode, other_info.
+- If a field is missing, use null.
+- Do not include any explanations, markdown, or extra text, unnecessarily escape underscores or other characters.
+- The output must be syntactically valid JSON. Do not return partial or malformed JSON structures.
 
 Text: {data.text}
 """
